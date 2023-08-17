@@ -1,5 +1,5 @@
-homepage: "https://seersco.com/"
+homepage: "https://seersco.com"
 documentation: "https://seersco.com/plugin/how-to-install-cookie-consent-banner-and-privacy-policy-using-google-tag-manager"
 versions:
-  - sha: a41eff06324816c5726d0f3422171164bec2952d
+  - sha: 55272febcb91448c7dbfed06707f98454af6daa1
     changeNotes: Initial release.
