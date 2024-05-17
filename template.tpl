@@ -62,10 +62,11 @@ ___SANDBOXED_JS_FOR_WEB_TEMPLATE___
 const log = require('logToConsole');
 const injectScript = require('injectScript');
 const queryPermission = require('queryPermission');
+const encodeUri = require('encodeUri');
 const sourceUrl = data.sourceUrl;
 const dataKey  = data.dataKey;
 
-const url = sourceUrl + "?param=" + dataKey;
+const url = encodeUri(sourceUrl) + "?param=" + encodeUri(dataKey);
 //log('Conductrics: Script load failed.',url);
 //log('data =', url);
 //data.gtmOnSuccess();
