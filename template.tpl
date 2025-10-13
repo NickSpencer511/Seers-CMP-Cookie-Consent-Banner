@@ -275,7 +275,7 @@ function initializeConsentPreferences(consentPreferences) {
 configureGtag({
   ads_data_redaction: !!data.adsRedaction,
   url_passthrough: !!data.urlPassThrough,
-  "developer_id.XY9A8ZK": true,
+  "developer_id.dNmU0M2": true,
 });
 
 for (let i = 0; i < regionalConsentConfig.length; i++) {
@@ -742,7 +742,7 @@ ___WEB_PERMISSIONS___
               },
               {
                 "type": 1,
-                "string": "developer_id.XY9A8ZK"
+                "string": "developer_id.dNmU0M2"
               }
             ]
           }
