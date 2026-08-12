@@ -253,6 +253,8 @@ const setConsentDefaults = require("setDefaultConsentState");
 const modifyConsentState = require("updateConsentState");
 const localStorage = require("localStorage");
 const JSON = require("JSON");
+const getTimestamp = require("getTimestamp");
+const makeNumber = require("makeNumber");
 const configureGtag = require("gtagSet");
 
 const sourceUrl = data.sourceUrl;
@@ -263,6 +265,57 @@ const delayTime = data.waitForUpdate;
 let applyGlobalDefaults = true;
 
 const encodedScriptUrl = encodeUri(sourceUrl) + "?param=" + encodeUri(dataKey);
+
+// Parse a GMT date string such as "Wed, 12 Aug 2026 11:58:21 GMT" into epoch
+// milliseconds. The native Date object is not available in sandboxed
+// JavaScript, so this is done by hand. Returns 0 when the input cannot be
+// parsed, which callers treat as "no proof of expiry".
+function parseGmtDate(dateString) {
+  if (!dateString) {
+    return 0;
+  }
+
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // "Wed, 12 Aug 2026 11:58:21 GMT" -> ["Wed,","12","Aug","2026","11:58:21","GMT"]
+  const parts = dateString.trim().split(' ').filter(function (part) {
+    return part.length > 0;
+  });
+
+  if (parts.length < 5) {
+    return 0;
+  }
+
+  const day = makeNumber(parts[1]);
+  const monthIndex = monthNames.indexOf(parts[2]);
+  const year = makeNumber(parts[3]);
+  const timeParts = parts[4].split(':');
+
+  if (!day || monthIndex < 0 || !year || timeParts.length < 3) {
+    return 0;
+  }
+
+  const hours = makeNumber(timeParts[0]);
+  const minutes = makeNumber(timeParts[1]);
+  const seconds = makeNumber(timeParts[2]);
+
+  // Days elapsed since the Unix epoch, accounting for leap years.
+  let totalDays = 0;
+  for (let y = 1970; y < year; y++) {
+    totalDays += ((y % 4 === 0 && y % 100 !== 0) || y % 400 === 0) ? 366 : 365;
+  }
+
+  const isLeap = ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0);
+  const monthLengths = [31, isLeap ? 29 : 28, 31, 30, 31, 30,
+                        31, 31, 30, 31, 30, 31];
+  for (let m = 0; m < monthIndex; m++) {
+    totalDays += monthLengths[m];
+  }
+  totalDays += day - 1;
+
+  return ((totalDays * 24 + hours) * 60 + minutes) * 60000 + seconds * 1000;
+}
 
 function initializeConsentPreferences(consentPreferences) {
   if (delayTime > 0) consentPreferences.wait_for_update = delayTime;
@@ -345,12 +398,14 @@ if (queryPermission('access_local_storage', 'read', CONSENT_STORAGE_KEY)) {
         const expiryParts = storedItem.expiry.split('=');
 
         if (expiryParts.length > 1 && expiryParts[1]) {
-          const expiryTime = Math.round(new Date(expiryParts[1]));
-          const currentTime = Math.round(new Date());
+          // The native Date object is not available in sandboxed JavaScript,
+          // so compare epoch milliseconds via getTimestamp() and parse the
+          // stored GMT string with fromBase64-free manual handling below.
+          const expiryTime = parseGmtDate(expiryParts[1]);
 
           // Only expire when the deadline can actually be shown to have passed;
           // an unparseable date is not proof of expiry.
-          if (expiryTime && currentTime > expiryTime) {
+          if (expiryTime && getTimestamp() > expiryTime) {
             isExpired = true;
           }
         }
