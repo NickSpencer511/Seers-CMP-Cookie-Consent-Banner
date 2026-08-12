@@ -1,6 +1,8 @@
 homepage: "https://seersco.com"
 documentation: "https://seersco.com/plugin/how-to-install-cookie-consent-banner-and-privacy-policy-using-google-tag-manager"
 versions:
+  - sha: e28845f4baeb06548bc7128a02ec62c378785fc1
+    changeNotes: Restore a returning visitor's saved consent choice on Consent Initialization.
   - sha: 4ad730a48217aac0651f15f1c4933620567bfbaa
     changeNotes: Developer ID Updation.
   - sha: 1c522e6bbd44eababf4a4414a88f788d249706c5
