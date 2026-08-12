@@ -251,7 +251,8 @@ const queryPermission = require('queryPermission');
 const encodeUri = require('encodeUri');
 const setConsentDefaults = require("setDefaultConsentState");
 const modifyConsentState = require("updateConsentState");
-const fetchCookieValues = require("getCookieValues");
+const localStorage = require("localStorage");
+const JSON = require("JSON");
 const configureGtag = require("gtagSet");
 
 const sourceUrl = data.sourceUrl;
@@ -262,10 +263,6 @@ const delayTime = data.waitForUpdate;
 let applyGlobalDefaults = true;
 
 const encodedScriptUrl = encodeUri(sourceUrl) + "?param=" + encodeUri(dataKey);
-
-function mapConsentDecision(consentChoice) {
-  return consentChoice === "yes" ? "granted" : "denied";
-}
 
 function initializeConsentPreferences(consentPreferences) {
   if (delayTime > 0) consentPreferences.wait_for_update = delayTime;
@@ -316,41 +313,77 @@ if (applyGlobalDefaults) {
   });
 }
 
-if (queryPermission('read_cookie', 'cookieyes-consent')) {
-  const storedConsentValues = fetchCookieValues("cookieyes-consent", false);
+// Restore a returning visitor's previously saved consent choice.
+//
+// The Seers CMP persists the visitor's decision in localStorage under
+// 'SeersCMPConsent', shaped as:
+//   { value: "<JSON string of {pref, stat, market, ...}>",
+//     expiry: "; expires=<GMT date>" }
+//
+// Applying it here - on the Consent Initialization trigger, before the CMP
+// script is injected - means the stored decision reaches Google Consent Mode
+// before any other trigger in the container can fire. Restoring it from the
+// banner script instead relies on a gtag consent command, which Google queues
+// behind other pending messages and therefore lands too late on a reload.
+const CONSENT_STORAGE_KEY = 'SeersCMPConsent';
 
-  if (storedConsentValues && storedConsentValues.length > 0 && typeof storedConsentValues[0] === "string") {
-    const storedConsentString = storedConsentValues[0];
+if (queryPermission('access_local_storage', 'read', CONSENT_STORAGE_KEY)) {
+  const storedItemString = localStorage.getItem(CONSENT_STORAGE_KEY);
 
-    const parsedConsentData = storedConsentString.split(",").reduce((acc, curr) => {
-      const keyValuePair = curr.trim().split(":");
-      acc[keyValuePair[0]] = mapConsentDecision(keyValuePair[1]);
-      return acc;
-    }, {});
+  if (storedItemString) {
+    // JSON.parse returns undefined on malformed input rather than throwing,
+    // so every access below is guarded.
+    const storedItem = JSON.parse(storedItemString);
 
-    modifyConsentState({
-      ad_storage: parsedConsentData.advertisementCookies || "denied",
-      analytics_storage: parsedConsentData.analyticsCookies || "denied",
-      functionality_storage: parsedConsentData.functionalCookies || "denied",
-      personalization_storage: parsedConsentData.shareUserDataWithGoogle || "denied",
-      security_storage: parsedConsentData.necessaryCookies || "granted",
-      ad_user_data: parsedConsentData.advertisementCookies || "denied",
-      ad_personalization: parsedConsentData.advertisementCookies || "denied",
-    });
-  } else {
-    log("No valid consent cookie found, applying default settings.");
-    modifyConsentState({
-      ad_storage: "denied",
-      analytics_storage: "denied",
-      functionality_storage: "denied",
-      personalization_storage: "denied",
-      security_storage: "granted",
-      ad_user_data: "denied",
-      ad_personalization: "denied"
-    });
+    if (storedItem && storedItem.value) {
+      // Honour the same expiry semantics the CMP itself uses: the expiry is
+      // stored as "; expires=<GMT date>", and an elapsed date means the saved
+      // choice is treated as absent so the regional defaults above stand.
+      let isExpired = false;
+
+      if (storedItem.expiry) {
+        const expiryParts = storedItem.expiry.split('=');
+
+        if (expiryParts.length > 1 && expiryParts[1]) {
+          const expiryTime = Math.round(new Date(expiryParts[1]));
+          const currentTime = Math.round(new Date());
+
+          // Only expire when the deadline can actually be shown to have passed;
+          // an unparseable date is not proof of expiry.
+          if (expiryTime && currentTime > expiryTime) {
+            isExpired = true;
+          }
+        }
+      }
+
+      if (!isExpired) {
+        const savedConsent = JSON.parse(storedItem.value);
+
+        // Only restore an EXPLICIT saved choice - all three core categories
+        // must be real booleans. Anything else means we do not know what the
+        // visitor chose, so the regional defaults are left untouched.
+        if (savedConsent &&
+            typeof savedConsent.pref === 'boolean' &&
+            typeof savedConsent.stat === 'boolean' &&
+            typeof savedConsent.market === 'boolean') {
+
+          modifyConsentState({
+            ad_storage: savedConsent.market ? "granted" : "denied",
+            analytics_storage: savedConsent.stat ? "granted" : "denied",
+            functionality_storage: savedConsent.pref ? "granted" : "denied",
+            personalization_storage: savedConsent.pref ? "granted" : "denied",
+            security_storage: "granted",
+            ad_user_data: savedConsent.market ? "granted" : "denied",
+            ad_personalization: savedConsent.market ? "granted" : "denied"
+          });
+        }
+      }
+    }
   }
+  // No stored choice means a first-time visitor: deliberately do nothing so
+  // the regional default consent state set above remains in force.
 } else {
-  log("Permission denied for reading 'seers-consent' cookie.");
+  log("Permission denied for reading '" + CONSENT_STORAGE_KEY + "' from local storage.");
 }
 
 const handleSuccess = () => {
@@ -757,25 +790,45 @@ ___WEB_PERMISSIONS___
   {
     "instance": {
       "key": {
-        "publicId": "get_cookies",
+        "publicId": "access_local_storage",
         "versionId": "1"
       },
       "param": [
         {
-          "key": "cookieAccess",
-          "value": {
-            "type": 1,
-            "string": "specific"
-          }
-        },
-        {
-          "key": "cookieNames",
+          "key": "keys",
           "value": {
             "type": 2,
             "listItem": [
               {
-                "type": 1,
-                "string": "seers_consent"
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "key"
+                  },
+                  {
+                    "type": 1,
+                    "string": "read"
+                  },
+                  {
+                    "type": 1,
+                    "string": "write"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "SeersCMPConsent"
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": false
+                  }
+                ]
               }
             ]
           }
